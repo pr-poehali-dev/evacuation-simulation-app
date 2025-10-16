@@ -91,16 +91,20 @@ const SimulationCanvas = ({
   useEffect(() => {
     if (!isSimulating) return;
 
-    const updatedPeople = people.map(person => {
+    setPeople(prevPeople => prevPeople.map(person => {
       if (person.evacuated) return person;
       if (person.path.length === 0) {
         return { ...person, path: findPath(person, exits, emergencies) };
       }
       return person;
-    });
+    }));
+  }, [isSimulating]);
 
-    setPeople(updatedPeople);
-  }, [isSimulating, emergencies]);
+  const currentRooms = rooms.filter(room => {
+    if (!room.name.includes('этаж')) return true;
+    const floorMatch = room.name.match(/(\d+) этаж/);
+    return floorMatch ? parseInt(floorMatch[1]) === currentFloor : true;
+  });
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -115,7 +119,7 @@ const SimulationCanvas = ({
       ctx.fillStyle = '#f9fafb';
       ctx.fillRect(0, 0, canvas.width, canvas.height);
 
-      rooms.forEach(room => {
+      currentRooms.forEach(room => {
         ctx.fillStyle = '#ffffff';
         ctx.strokeStyle = '#d1d5db';
         ctx.lineWidth = 2;
@@ -256,13 +260,7 @@ const SimulationCanvas = ({
         cancelAnimationFrame(animationFrameRef.current);
       }
     };
-  }, [people, rooms, exits, emergencies, isSimulating, simulationSpeed]);
-
-  const currentRooms = rooms.filter(room => {
-    if (!room.name.includes('этаж')) return true;
-    const floorMatch = room.name.match(/(\d+) этаж/);
-    return floorMatch ? parseInt(floorMatch[1]) === currentFloor : true;
-  });
+  }, [people, currentRooms, exits, emergencies, isSimulating, simulationSpeed, currentFloor]);
 
   return (
     <div className="relative rounded-xl overflow-hidden shadow-inner bg-gray-100 border-2 border-gray-200">

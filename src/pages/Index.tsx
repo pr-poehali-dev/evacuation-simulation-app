@@ -129,8 +129,10 @@ const Index = () => {
     
     if (placementMode === 'person') {
       addPerson(selectedPersonType, x, y);
+      setPlacementMode(null);
     } else if (placementMode === 'emergency') {
       addEmergency(selectedEmergencyType, x, y);
+      setPlacementMode(null);
     }
   };
 
@@ -140,8 +142,8 @@ const Index = () => {
   };
 
   const updatePerson = (updatedPerson: Person) => {
-    setPeople(prev => prev.map(p => p.id === updatedPerson.id ? updatedPerson : p));
-    setSelectedPerson(updatedPerson);
+    setPeople(prev => prev.map(p => p.id === updatedPerson.id ? { ...updatedPerson, path: [], currentPathIndex: 0 } : p));
+    setSelectedPerson(null);
   };
 
   const deletePerson = (personId: string) => {
@@ -152,12 +154,18 @@ const Index = () => {
   const loadBuilding = (buildingId: string) => {
     const template = buildingTemplates.find(b => b.id === buildingId);
     if (template) {
+      if (people.length > 0 || emergencies.length > 0) {
+        const confirmed = window.confirm('Загрузка нового плана удалит всех людей и зоны ЧС. Продолжить?');
+        if (!confirmed) return;
+      }
       setRooms(template.rooms);
       setExits(template.exits);
       setTotalFloors(template.floors);
       setCurrentFloor(1);
       setPeople([]);
       setEmergencies([]);
+      setPlacementMode(null);
+      setSelectedPerson(null);
       resetSimulation();
     }
   };
