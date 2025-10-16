@@ -12,6 +12,7 @@ import Statistics from '@/components/Statistics';
 import BuildingSelector from '@/components/BuildingSelector';
 import PersonEditor from '@/components/PersonEditor';
 import { buildingTemplates } from '@/types/buildings';
+import BuildingEditor from '@/components/BuildingEditor';
 
 export interface Person {
   id: string;
@@ -23,6 +24,8 @@ export interface Person {
   evacuated: boolean;
   path: { x: number; y: number }[];
   currentPathIndex: number;
+  floor: number;
+  groupId?: string;
 }
 
 export interface Room {
@@ -47,6 +50,16 @@ export interface Emergency {
   y: number;
   radius: number;
   type: 'fire' | 'smoke' | 'collapse';
+  floor: number;
+}
+
+export interface SafeZone {
+  id: string;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  name: string;
 }
 
 const Index = () => {
@@ -65,14 +78,20 @@ const Index = () => {
   const [emergencies, setEmergencies] = useState<Emergency[]>([]);
   const [evacuationTime, setEvacuationTime] = useState(0);
   const [simulationSpeed, setSimulationSpeed] = useState([1]);
-  const [placementMode, setPlacementMode] = useState<'person' | 'emergency' | null>(null);
+  const [placementMode, setPlacementMode] = useState<'person' | 'emergency' | 'room' | 'exit' | 'safezone' | null>(null);
   const [selectedPersonType, setSelectedPersonType] = useState<Person['type']>('adult');
   const [selectedEmergencyType, setSelectedEmergencyType] = useState<Emergency['type']>('fire');
   const [selectedPerson, setSelectedPerson] = useState<Person | null>(null);
   const [currentFloor, setCurrentFloor] = useState(1);
   const [totalFloors, setTotalFloors] = useState(1);
+  const [initialPeople, setInitialPeople] = useState<Person[]>([]);
+  const [multiPlaceCount, setMultiPlaceCount] = useState(1);
+  const [safeZones, setSafeZones] = useState<SafeZone[]>([]);
+  const [isDrawingRoom, setIsDrawingRoom] = useState(false);
+  const [drawStart, setDrawStart] = useState<{ x: number; y: number } | null>(null);
+  const [hasSimulationRun, setHasSimulationRun] = useState(false);
 
-  const addPerson = (type: Person['type'], x?: number, y?: number) => {
+  const addPerson = (type: Person['type'], x?: number, y?: number, count: number = 1) => {
     const speedMap = {
       adult: 1.5,
       child: 1.2,
@@ -80,28 +99,43 @@ const Index = () => {
       disabled: 0.5,
     };
     
-    let posX = x;
-    let posY = y;
+    const groupId = count > 1 ? `group-${Date.now()}` : undefined;
+    const newPeople: Person[] = [];
     
-    if (posX === undefined || posY === undefined) {
-      const room = rooms[Math.floor(Math.random() * rooms.length)];
-      posX = room.x + Math.random() * (room.width - 20) + 10;
-      posY = room.y + Math.random() * (room.height - 20) + 10;
+    for (let i = 0; i < count; i++) {
+      let posX = x;
+      let posY = y;
+      
+      if (posX === undefined || posY === undefined) {
+        const currentFloorRooms = rooms.filter(r => !r.name.includes('этаж') || r.name.includes(`${currentFloor} этаж`));
+        const room = currentFloorRooms[Math.floor(Math.random() * currentFloorRooms.length)];
+        posX = room.x + Math.random() * (room.width - 20) + 10;
+        posY = room.y + Math.random() * (room.height - 20) + 10;
+      } else if (count > 1) {
+        const angle = (Math.PI * 2 * i) / count;
+        const radius = 20 + (count / 5);
+        posX = x + Math.cos(angle) * radius;
+        posY = y + Math.sin(angle) * radius;
+      }
+      
+      const newPerson: Person = {
+        id: `person-${Date.now()}-${Math.random()}-${i}`,
+        x: posX,
+        y: posY,
+        type,
+        speed: speedMap[type],
+        size: type === 'child' ? 8 : type === 'disabled' ? 12 : 10,
+        evacuated: false,
+        path: [],
+        currentPathIndex: 0,
+        floor: currentFloor,
+        groupId,
+      };
+      
+      newPeople.push(newPerson);
     }
     
-    const newPerson: Person = {
-      id: `person-${Date.now()}-${Math.random()}`,
-      x: posX,
-      y: posY,
-      type,
-      speed: speedMap[type],
-      size: type === 'child' ? 8 : type === 'disabled' ? 12 : 10,
-      evacuated: false,
-      path: [],
-      currentPathIndex: 0,
-    };
-    
-    setPeople(prev => [...prev, newPerson]);
+    setPeople(prev => [...prev, ...newPeople]);
   };
 
   const addEmergency = (type: Emergency['type'], x?: number, y?: number) => {
@@ -109,7 +143,8 @@ const Index = () => {
     let posY = y;
     
     if (posX === undefined || posY === undefined) {
-      const room = rooms[Math.floor(Math.random() * rooms.length)];
+      const currentFloorRooms = rooms.filter(r => !r.name.includes('этаж') || r.name.includes(`${currentFloor} этаж`));
+      const room = currentFloorRooms[Math.floor(Math.random() * currentFloorRooms.length)];
       posX = room.x + room.width / 2;
       posY = room.y + room.height / 2;
     }
@@ -120,6 +155,7 @@ const Index = () => {
       y: posY,
       radius: type === 'fire' ? 60 : type === 'smoke' ? 80 : 50,
       type,
+      floor: currentFloor,
     };
     setEmergencies(prev => [...prev, newEmergency]);
   };
@@ -128,11 +164,57 @@ const Index = () => {
     if (isSimulating) return;
     
     if (placementMode === 'person') {
-      addPerson(selectedPersonType, x, y);
-      setPlacementMode(null);
+      addPerson(selectedPersonType, x, y, multiPlaceCount);
+      if (multiPlaceCount === 1) setPlacementMode(null);
     } else if (placementMode === 'emergency') {
       addEmergency(selectedEmergencyType, x, y);
       setPlacementMode(null);
+    } else if (placementMode === 'room') {
+      if (!drawStart) {
+        setDrawStart({ x, y });
+        setIsDrawingRoom(true);
+      } else {
+        const width = Math.abs(x - drawStart.x);
+        const height = Math.abs(y - drawStart.y);
+        const newRoom: Room = {
+          id: `room-${Date.now()}`,
+          x: Math.min(x, drawStart.x),
+          y: Math.min(y, drawStart.y),
+          width,
+          height,
+          name: `${currentFloor > 1 ? currentFloor + ' этаж: ' : ''}Комната ${rooms.length + 1}`,
+        };
+        setRooms(prev => [...prev, newRoom]);
+        setDrawStart(null);
+        setIsDrawingRoom(false);
+      }
+    } else if (placementMode === 'exit') {
+      const newExit: Exit = {
+        id: `exit-${Date.now()}`,
+        x: x - 20,
+        y: y - 10,
+        width: 40,
+      };
+      setExits(prev => [...prev, newExit]);
+      setPlacementMode(null);
+    } else if (placementMode === 'safezone') {
+      if (!drawStart) {
+        setDrawStart({ x, y });
+      } else {
+        const width = Math.abs(x - drawStart.x);
+        const height = Math.abs(y - drawStart.y);
+        const newZone: SafeZone = {
+          id: `safe-${Date.now()}`,
+          x: Math.min(x, drawStart.x),
+          y: Math.min(y, drawStart.y),
+          width,
+          height,
+          name: 'Зона сбора',
+        };
+        setSafeZones(prev => [...prev, newZone]);
+        setDrawStart(null);
+        setPlacementMode(null);
+      }
     }
   };
 
@@ -171,6 +253,10 @@ const Index = () => {
   };
 
   const startSimulation = () => {
+    if (!hasSimulationRun) {
+      setInitialPeople(JSON.parse(JSON.stringify(people)));
+      setHasSimulationRun(true);
+    }
     setIsSimulating(true);
     setEvacuationTime(0);
   };
@@ -181,12 +267,31 @@ const Index = () => {
 
   const resetSimulation = () => {
     setIsSimulating(false);
-    setPeople(prev => prev.map(p => ({ ...p, evacuated: false, path: [], currentPathIndex: 0 })));
+    setPeople([]);
+    setEmergencies([]);
+    setSafeZones([]);
+    setEvacuationTime(0);
+    setInitialPeople([]);
+    setHasSimulationRun(false);
+    setPlacementMode(null);
+    setSelectedPerson(null);
+  };
+
+  const restartSimulation = () => {
+    setIsSimulating(false);
+    setPeople(JSON.parse(JSON.stringify(initialPeople)));
     setEvacuationTime(0);
   };
 
+  const currentFloorPeople = people.filter(p => p.floor === currentFloor);
   const evacuatedCount = people.filter(p => p.evacuated).length;
   const evacuationProgress = people.length > 0 ? (evacuatedCount / people.length) * 100 : 0;
+
+  useEffect(() => {
+    if (isSimulating && people.length > 0 && evacuatedCount === people.length) {
+      setIsSimulating(false);
+    }
+  }, [evacuatedCount, people.length, isSimulating]);
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-gray-50 via-gray-100 to-gray-200">
@@ -238,23 +343,34 @@ const Index = () => {
                       Пауза
                     </Button>
                   )}
+                  {hasSimulationRun && (
+                    <Button 
+                      onClick={restartSimulation}
+                      variant="outline"
+                      className="border-blue-300 text-blue-600 hover:bg-blue-50"
+                    >
+                      <Icon name="RotateCw" size={18} className="mr-2" />
+                      Повтор
+                    </Button>
+                  )}
                   <Button 
                     onClick={resetSimulation}
                     variant="outline"
                     className="border-gray-300"
                   >
-                    <Icon name="RotateCcw" size={18} className="mr-2" />
-                    Сброс
+                    <Icon name="Trash2" size={18} className="mr-2" />
+                    Очистить
                   </Button>
                 </div>
               </div>
 
               <SimulationCanvas
-                people={people}
+                people={currentFloorPeople}
                 setPeople={setPeople}
                 rooms={rooms}
                 exits={exits}
                 emergencies={emergencies}
+                safeZones={safeZones}
                 isSimulating={isSimulating}
                 evacuationTime={evacuationTime}
                 setEvacuationTime={setEvacuationTime}
@@ -263,6 +379,9 @@ const Index = () => {
                 onPersonClick={handlePersonClick}
                 placementMode={placementMode}
                 currentFloor={currentFloor}
+                drawStart={drawStart}
+                isDrawingRoom={isDrawingRoom}
+                allPeople={people}
               />
 
               {totalFloors > 1 && (
@@ -335,6 +454,8 @@ const Index = () => {
                       setSelectedPersonType(type);
                     }}
                     onCancelPlacement={() => setPlacementMode(null)}
+                    multiPlaceCount={multiPlaceCount}
+                    onSetMultiPlaceCount={setMultiPlaceCount}
                   />
                 </TabsContent>
 
@@ -353,17 +474,18 @@ const Index = () => {
                 </TabsContent>
 
                 <TabsContent value="building" className="space-y-4">
-                  <div className="space-y-3">
-                    <p className="text-sm text-gray-600">План: {rooms.length} помещений, {exits.length} выходов</p>
-                    <div className="p-3 bg-blue-50 rounded-lg border border-blue-200">
-                      <div className="flex items-start gap-2">
-                        <Icon name="Info" size={16} className="text-blue-600 mt-0.5" />
-                        <p className="text-xs text-blue-700">
-                          Выберите готовый план здания из библиотеки выше или используйте текущий.
-                        </p>
-                      </div>
-                    </div>
-                  </div>
+                  <BuildingEditor
+                    placementMode={placementMode}
+                    onSetPlacementMode={setPlacementMode}
+                    onCancelPlacement={() => {
+                      setPlacementMode(null);
+                      setDrawStart(null);
+                      setIsDrawingRoom(false);
+                    }}
+                    roomsCount={rooms.length}
+                    exitsCount={exits.length}
+                    safeZonesCount={safeZones.length}
+                  />
                 </TabsContent>
               </Tabs>
             </Card>

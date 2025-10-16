@@ -1,15 +1,28 @@
+import { useState } from 'react';
 import { Button } from '@/components/ui/button';
+import { Slider } from '@/components/ui/slider';
+import { Label } from '@/components/ui/label';
 import Icon from '@/components/ui/icon';
 
 interface PeopleConfigProps {
   onAddPerson: (type: 'adult' | 'child' | 'elderly' | 'disabled') => void;
   peopleCount: number;
-  placementMode: 'person' | 'emergency' | null;
+  placementMode: 'person' | 'emergency' | 'room' | 'exit' | 'safezone' | null;
   onSetPlacementMode: (type: 'adult' | 'child' | 'elderly' | 'disabled') => void;
   onCancelPlacement: () => void;
+  multiPlaceCount: number;
+  onSetMultiPlaceCount: (count: number) => void;
 }
 
-const PeopleConfig = ({ onAddPerson, peopleCount, placementMode, onSetPlacementMode, onCancelPlacement }: PeopleConfigProps) => {
+const PeopleConfig = ({ 
+  onAddPerson, 
+  peopleCount, 
+  placementMode, 
+  onSetPlacementMode, 
+  onCancelPlacement,
+  multiPlaceCount,
+  onSetMultiPlaceCount,
+}: PeopleConfigProps) => {
   const peopleTypes = [
     { type: 'adult' as const, label: 'Взрослый', icon: 'User', color: 'bg-blue-500', speed: '1.5 м/с' },
     { type: 'child' as const, label: 'Ребенок', icon: 'Baby', color: 'bg-amber-500', speed: '1.2 м/с' },
@@ -25,12 +38,28 @@ const PeopleConfig = ({ onAddPerson, peopleCount, placementMode, onSetPlacementM
       </div>
 
       <div className="space-y-3">
+        <div className="space-y-2">
+          <div className="flex justify-between items-center">
+            <Label className="text-sm font-medium text-gray-700">Количество одновременно</Label>
+            <span className="text-sm font-semibold text-gray-900">{multiPlaceCount}</span>
+          </div>
+          <Slider
+            value={[multiPlaceCount]}
+            onValueChange={(value) => onSetMultiPlaceCount(value[0])}
+            min={1}
+            max={20}
+            step={1}
+            className="w-full"
+          />
+          <p className="text-xs text-gray-500">Размещение группы людей одним кликом</p>
+        </div>
+
         {placementMode === 'person' && (
           <div className="p-3 bg-green-50 border border-green-300 rounded-lg">
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-2">
                 <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse" />
-                <span className="text-sm font-medium text-green-700">Режим размещения</span>
+                <span className="text-sm font-medium text-green-700">Размещение {multiPlaceCount > 1 ? `${multiPlaceCount} чел.` : '1 чел.'}</span>
               </div>
               <Button size="sm" variant="ghost" onClick={onCancelPlacement}>
                 <Icon name="X" size={16} />
@@ -65,7 +94,7 @@ const PeopleConfig = ({ onAddPerson, peopleCount, placementMode, onSetPlacementM
         <div className="flex items-start gap-2">
           <Icon name="Info" size={16} className="text-blue-600 mt-0.5" />
           <p className="text-xs text-blue-700">
-            Нажмите на тип человека, затем кликните на план здания для размещения. Кликните на человека для редактирования.
+            Выберите тип, установите количество и кликните на план. Группы связаны и эвакуируются вместе.
           </p>
         </div>
       </div>

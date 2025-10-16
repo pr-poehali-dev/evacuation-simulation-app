@@ -6,7 +6,7 @@ interface EmergencyZonesProps {
   onAddEmergency: (type: 'fire' | 'smoke' | 'collapse') => void;
   emergencies: Emergency[];
   onRemoveEmergency: (id: string) => void;
-  placementMode: 'person' | 'emergency' | null;
+  placementMode: 'person' | 'emergency' | 'room' | 'exit' | 'safezone' | null;
   onSetPlacementMode: (type: 'fire' | 'smoke' | 'collapse') => void;
   onCancelPlacement: () => void;
 }

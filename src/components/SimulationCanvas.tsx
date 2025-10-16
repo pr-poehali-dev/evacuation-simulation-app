@@ -1,5 +1,5 @@
 import { useEffect, useRef } from 'react';
-import type { Person, Room, Exit, Emergency } from '@/pages/Index';
+import type { Person, Room, Exit, Emergency, SafeZone } from '@/pages/Index';
 
 interface SimulationCanvasProps {
   people: Person[];
@@ -7,14 +7,18 @@ interface SimulationCanvasProps {
   rooms: Room[];
   exits: Exit[];
   emergencies: Emergency[];
+  safeZones: SafeZone[];
   isSimulating: boolean;
   evacuationTime: number;
   setEvacuationTime: React.Dispatch<React.SetStateAction<number>>;
   simulationSpeed: number;
   onCanvasClick: (x: number, y: number) => void;
   onPersonClick: (person: Person) => void;
-  placementMode: 'person' | 'emergency' | null;
+  placementMode: 'person' | 'emergency' | 'room' | 'exit' | 'safezone' | null;
   currentFloor: number;
+  drawStart: { x: number; y: number } | null;
+  isDrawingRoom: boolean;
+  allPeople: Person[];
 }
 
 const SimulationCanvas = ({
@@ -23,6 +27,7 @@ const SimulationCanvas = ({
   rooms,
   exits,
   emergencies,
+  safeZones,
   isSimulating,
   evacuationTime,
   setEvacuationTime,
@@ -31,9 +36,13 @@ const SimulationCanvas = ({
   onPersonClick,
   placementMode,
   currentFloor,
+  drawStart,
+  isDrawingRoom,
+  allPeople,
 }: SimulationCanvasProps) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const animationFrameRef = useRef<number>();
+  const mousePos = useRef<{ x: number; y: number }>({ x: 0, y: 0 });
 
   const handleCanvasClickInternal = (e: React.MouseEvent<HTMLCanvasElement>) => {
     const canvas = canvasRef.current;
@@ -57,7 +66,24 @@ const SimulationCanvas = ({
     }
   };
 
-  const findPath = (person: Person, exits: Exit[], emergencies: Emergency[]): { x: number; y: number }[] => {
+  const handleMouseMove = (e: React.MouseEvent<HTMLCanvasElement>) => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+
+    const rect = canvas.getBoundingClientRect();
+    const scaleX = canvas.width / rect.width;
+    const scaleY = canvas.height / rect.height;
+    mousePos.current = {
+      x: (e.clientX - rect.left) * scaleX,
+      y: (e.clientY - rect.top) * scaleY,
+    };
+  };
+
+  const isPointInRoom = (x: number, y: number, room: Room): boolean => {
+    return x >= room.x && x <= room.x + room.width && y >= room.y && y <= room.y + room.height;
+  };
+
+  const findPath = (person: Person, exits: Exit[], rooms: Room[], emergencies: Emergency[]): { x: number; y: number }[] => {
     const nearestExit = exits.reduce((nearest, exit) => {
       const distToExit = Math.hypot(exit.x - person.x, exit.y - person.y);
       const nearestDist = Math.hypot(nearest.x - person.x, nearest.y - person.y);
@@ -65,20 +91,39 @@ const SimulationCanvas = ({
     });
 
     const path: { x: number; y: number }[] = [];
-    const steps = 20;
+    const currentRoom = rooms.find(room => isPointInRoom(person.x, person.y, room));
+    
+    if (currentRoom) {
+      const doorX = currentRoom.x + currentRoom.width;
+      const doorY = currentRoom.y + currentRoom.height / 2;
+      
+      const stepsToDoор = 10;
+      for (let i = 1; i <= stepsToDoор; i++) {
+        const t = i / stepsToDoор;
+        path.push({
+          x: person.x + (doorX - person.x) * t,
+          y: person.y + (doorY - person.y) * t,
+        });
+      }
+    }
+
+    const steps = 15;
+    const startX = currentRoom ? currentRoom.x + currentRoom.width : person.x;
+    const startY = currentRoom ? currentRoom.y + currentRoom.height / 2 : person.y;
     
     for (let i = 0; i <= steps; i++) {
       const t = i / steps;
-      let x = person.x + (nearestExit.x - person.x) * t;
-      let y = person.y + (nearestExit.y - person.y) * t;
+      let x = startX + (nearestExit.x - startX) * t;
+      let y = startY + (nearestExit.y - startY) * t;
 
       emergencies.forEach(emergency => {
+        if (emergency.floor !== currentFloor) return;
         const dist = Math.hypot(emergency.x - x, emergency.y - y);
         if (dist < emergency.radius + 30) {
           const angle = Math.atan2(y - emergency.y, x - emergency.x);
           const avoidDist = emergency.radius + 30 - dist;
-          x += Math.cos(angle) * avoidDist;
-          y += Math.sin(angle) * avoidDist;
+          x += Math.cos(angle) * avoidDist * 1.5;
+          y += Math.sin(angle) * avoidDist * 1.5;
         }
       });
 
@@ -92,9 +137,10 @@ const SimulationCanvas = ({
     if (!isSimulating) return;
 
     setPeople(prevPeople => prevPeople.map(person => {
-      if (person.evacuated) return person;
+      if (person.evacuated || person.floor !== currentFloor) return person;
       if (person.path.length === 0) {
-        return { ...person, path: findPath(person, exits, emergencies) };
+        const currentFloorRooms = rooms.filter(r => !r.name.includes('этаж') || r.name.includes(`${currentFloor} этаж`));
+        return { ...person, path: findPath(person, exits, currentFloorRooms, emergencies) };
       }
       return person;
     }));
@@ -105,6 +151,8 @@ const SimulationCanvas = ({
     const floorMatch = room.name.match(/(\d+) этаж/);
     return floorMatch ? parseInt(floorMatch[1]) === currentFloor : true;
   });
+
+  const currentEmergencies = emergencies.filter(e => e.floor === currentFloor);
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -132,6 +180,21 @@ const SimulationCanvas = ({
         ctx.fillText(room.name, room.x + room.width / 2, room.y + room.height / 2);
       });
 
+      safeZones.forEach(zone => {
+        ctx.fillStyle = 'rgba(34, 197, 94, 0.15)';
+        ctx.strokeStyle = '#22c55e';
+        ctx.lineWidth = 2;
+        ctx.setLineDash([5, 5]);
+        ctx.fillRect(zone.x, zone.y, zone.width, zone.height);
+        ctx.strokeRect(zone.x, zone.y, zone.width, zone.height);
+        ctx.setLineDash([]);
+
+        ctx.fillStyle = '#22c55e';
+        ctx.font = 'bold 14px Inter';
+        ctx.textAlign = 'center';
+        ctx.fillText(zone.name, zone.x + zone.width / 2, zone.y + zone.height / 2);
+      });
+
       exits.forEach(exit => {
         const gradient = ctx.createLinearGradient(exit.x, 0, exit.x + exit.width, 0);
         gradient.addColorStop(0, '#10b981');
@@ -145,7 +208,7 @@ const SimulationCanvas = ({
         ctx.fillText('EXIT', exit.x + exit.width / 2, exit.y + 5);
       });
 
-      emergencies.forEach(emergency => {
+      currentEmergencies.forEach(emergency => {
         const gradient = ctx.createRadialGradient(
           emergency.x, emergency.y, 0,
           emergency.x, emergency.y, emergency.radius
@@ -186,6 +249,22 @@ const SimulationCanvas = ({
           disabled: '#ec4899',
         };
 
+        if (person.groupId) {
+          const groupMembers = allPeople.filter(p => p.groupId === person.groupId && !p.evacuated);
+          if (groupMembers.length > 1) {
+            ctx.strokeStyle = `${colorMap[person.type]}30`;
+            ctx.lineWidth = 1;
+            ctx.setLineDash([2, 2]);
+            ctx.beginPath();
+            groupMembers.forEach((member, idx) => {
+              if (idx === 0) ctx.moveTo(member.x, member.y);
+              else ctx.lineTo(member.x, member.y);
+            });
+            ctx.stroke();
+            ctx.setLineDash([]);
+          }
+        }
+
         ctx.fillStyle = colorMap[person.type];
         ctx.beginPath();
         ctx.arc(person.x, person.y, person.size, 0, Math.PI * 2);
@@ -208,13 +287,27 @@ const SimulationCanvas = ({
           ctx.setLineDash([]);
         }
       });
+
+      if (drawStart && (placementMode === 'room' || placementMode === 'safezone')) {
+        const width = mousePos.current.x - drawStart.x;
+        const height = mousePos.current.y - drawStart.y;
+        
+        ctx.strokeStyle = placementMode === 'safezone' ? '#22c55e' : '#3b82f6';
+        ctx.lineWidth = 2;
+        ctx.setLineDash([5, 5]);
+        ctx.strokeRect(drawStart.x, drawStart.y, width, height);
+        ctx.setLineDash([]);
+        
+        ctx.fillStyle = placementMode === 'safezone' ? 'rgba(34, 197, 94, 0.1)' : 'rgba(59, 130, 246, 0.1)';
+        ctx.fillRect(drawStart.x, drawStart.y, width, height);
+      }
     };
 
     const animate = () => {
       if (isSimulating) {
         setPeople(prevPeople => {
           return prevPeople.map(person => {
-            if (person.evacuated) return person;
+            if (person.evacuated || person.floor !== currentFloor) return person;
 
             if (person.path.length > 0 && person.currentPathIndex < person.path.length) {
               const target = person.path[person.currentPathIndex];
@@ -235,10 +328,24 @@ const SimulationCanvas = ({
               }
 
               const angle = Math.atan2(dy, dx);
+              let newX = person.x + Math.cos(angle) * person.speed * simulationSpeed;
+              let newY = person.y + Math.sin(angle) * person.speed * simulationSpeed;
+
+              prevPeople.forEach(other => {
+                if (other.id === person.id || other.evacuated || other.floor !== person.floor) return;
+                const dist = Math.hypot(other.x - newX, other.y - newY);
+                const minDist = person.size + other.size + 2;
+                if (dist < minDist) {
+                  const pushAngle = Math.atan2(newY - other.y, newX - other.x);
+                  newX = other.x + Math.cos(pushAngle) * minDist;
+                  newY = other.y + Math.sin(pushAngle) * minDist;
+                }
+              });
+
               return {
                 ...person,
-                x: person.x + Math.cos(angle) * person.speed * simulationSpeed,
-                y: person.y + Math.sin(angle) * person.speed * simulationSpeed,
+                x: newX,
+                y: newY,
               };
             }
 
@@ -260,7 +367,7 @@ const SimulationCanvas = ({
         cancelAnimationFrame(animationFrameRef.current);
       }
     };
-  }, [people, currentRooms, exits, emergencies, isSimulating, simulationSpeed, currentFloor]);
+  }, [people, currentRooms, exits, currentEmergencies, safeZones, isSimulating, simulationSpeed, currentFloor, drawStart, mousePos.current, allPeople]);
 
   return (
     <div className="relative rounded-xl overflow-hidden shadow-inner bg-gray-100 border-2 border-gray-200">
@@ -270,14 +377,21 @@ const SimulationCanvas = ({
         height={500}
         className="w-full h-auto cursor-crosshair"
         onClick={handleCanvasClickInternal}
+        onMouseMove={handleMouseMove}
       />
       {placementMode && (
         <div className="absolute top-3 left-3 bg-white/90 backdrop-blur px-4 py-2 rounded-lg shadow-lg border border-gray-300">
           <div className="flex items-center gap-2 text-sm font-medium text-gray-700">
             <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse" />
-            {placementMode === 'person' ? 'Режим размещения людей' : 'Режим размещения зон ЧС'}
+            {placementMode === 'person' && 'Режим размещения людей'}
+            {placementMode === 'emergency' && 'Режим размещения зон ЧС'}
+            {placementMode === 'room' && 'Режим рисования комнат'}
+            {placementMode === 'exit' && 'Режим добавления выходов'}
+            {placementMode === 'safezone' && 'Режим создания зоны сбора'}
           </div>
-          <p className="text-xs text-gray-500 mt-1">Кликните на план для размещения</p>
+          <p className="text-xs text-gray-500 mt-1">
+            {(placementMode === 'room' || placementMode === 'safezone') ? 'Кликните дважды для границ' : 'Кликните на план'}
+          </p>
         </div>
       )}
     </div>
