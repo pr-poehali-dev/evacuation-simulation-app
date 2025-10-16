@@ -9,6 +9,9 @@ import SimulationCanvas from '@/components/SimulationCanvas';
 import PeopleConfig from '@/components/PeopleConfig';
 import EmergencyZones from '@/components/EmergencyZones';
 import Statistics from '@/components/Statistics';
+import BuildingSelector from '@/components/BuildingSelector';
+import PersonEditor from '@/components/PersonEditor';
+import { buildingTemplates } from '@/types/buildings';
 
 export interface Person {
   id: string;
@@ -62,9 +65,14 @@ const Index = () => {
   const [emergencies, setEmergencies] = useState<Emergency[]>([]);
   const [evacuationTime, setEvacuationTime] = useState(0);
   const [simulationSpeed, setSimulationSpeed] = useState([1]);
+  const [placementMode, setPlacementMode] = useState<'person' | 'emergency' | null>(null);
+  const [selectedPersonType, setSelectedPersonType] = useState<Person['type']>('adult');
+  const [selectedEmergencyType, setSelectedEmergencyType] = useState<Emergency['type']>('fire');
+  const [selectedPerson, setSelectedPerson] = useState<Person | null>(null);
+  const [currentFloor, setCurrentFloor] = useState(1);
+  const [totalFloors, setTotalFloors] = useState(1);
 
-  const addPerson = (type: Person['type']) => {
-    const room = rooms[Math.floor(Math.random() * rooms.length)];
+  const addPerson = (type: Person['type'], x?: number, y?: number) => {
     const speedMap = {
       adult: 1.5,
       child: 1.2,
@@ -72,10 +80,19 @@ const Index = () => {
       disabled: 0.5,
     };
     
+    let posX = x;
+    let posY = y;
+    
+    if (posX === undefined || posY === undefined) {
+      const room = rooms[Math.floor(Math.random() * rooms.length)];
+      posX = room.x + Math.random() * (room.width - 20) + 10;
+      posY = room.y + Math.random() * (room.height - 20) + 10;
+    }
+    
     const newPerson: Person = {
       id: `person-${Date.now()}-${Math.random()}`,
-      x: room.x + Math.random() * (room.width - 20) + 10,
-      y: room.y + Math.random() * (room.height - 20) + 10,
+      x: posX,
+      y: posY,
       type,
       speed: speedMap[type],
       size: type === 'child' ? 8 : type === 'disabled' ? 12 : 10,
@@ -87,16 +104,62 @@ const Index = () => {
     setPeople(prev => [...prev, newPerson]);
   };
 
-  const addEmergency = (type: Emergency['type']) => {
-    const room = rooms[Math.floor(Math.random() * rooms.length)];
+  const addEmergency = (type: Emergency['type'], x?: number, y?: number) => {
+    let posX = x;
+    let posY = y;
+    
+    if (posX === undefined || posY === undefined) {
+      const room = rooms[Math.floor(Math.random() * rooms.length)];
+      posX = room.x + room.width / 2;
+      posY = room.y + room.height / 2;
+    }
+    
     const newEmergency: Emergency = {
       id: `emergency-${Date.now()}`,
-      x: room.x + room.width / 2,
-      y: room.y + room.height / 2,
+      x: posX,
+      y: posY,
       radius: type === 'fire' ? 60 : type === 'smoke' ? 80 : 50,
       type,
     };
     setEmergencies(prev => [...prev, newEmergency]);
+  };
+
+  const handleCanvasClick = (x: number, y: number) => {
+    if (isSimulating) return;
+    
+    if (placementMode === 'person') {
+      addPerson(selectedPersonType, x, y);
+    } else if (placementMode === 'emergency') {
+      addEmergency(selectedEmergencyType, x, y);
+    }
+  };
+
+  const handlePersonClick = (person: Person) => {
+    if (isSimulating) return;
+    setSelectedPerson(person);
+  };
+
+  const updatePerson = (updatedPerson: Person) => {
+    setPeople(prev => prev.map(p => p.id === updatedPerson.id ? updatedPerson : p));
+    setSelectedPerson(updatedPerson);
+  };
+
+  const deletePerson = (personId: string) => {
+    setPeople(prev => prev.filter(p => p.id !== personId));
+    setSelectedPerson(null);
+  };
+
+  const loadBuilding = (buildingId: string) => {
+    const template = buildingTemplates.find(b => b.id === buildingId);
+    if (template) {
+      setRooms(template.rooms);
+      setExits(template.exits);
+      setTotalFloors(template.floors);
+      setCurrentFloor(1);
+      setPeople([]);
+      setEmergencies([]);
+      resetSimulation();
+    }
   };
 
   const startSimulation = () => {
@@ -188,7 +251,30 @@ const Index = () => {
                 evacuationTime={evacuationTime}
                 setEvacuationTime={setEvacuationTime}
                 simulationSpeed={simulationSpeed[0]}
+                onCanvasClick={handleCanvasClick}
+                onPersonClick={handlePersonClick}
+                placementMode={placementMode}
+                currentFloor={currentFloor}
               />
+
+              {totalFloors > 1 && (
+                <div className="mt-4 flex items-center justify-center gap-3">
+                  <span className="text-sm text-gray-600">Этаж:</span>
+                  <div className="flex gap-2">
+                    {Array.from({ length: totalFloors }, (_, i) => i + 1).map(floor => (
+                      <Button
+                        key={floor}
+                        variant={currentFloor === floor ? 'default' : 'outline'}
+                        size="sm"
+                        onClick={() => setCurrentFloor(floor)}
+                        className="w-10"
+                      >
+                        {floor}
+                      </Button>
+                    ))}
+                  </div>
+                </div>
+              )}
 
               <div className="mt-4 space-y-2">
                 <div className="flex items-center justify-between text-sm">
@@ -212,9 +298,11 @@ const Index = () => {
           </div>
 
           <div className="space-y-6">
+            <BuildingSelector onSelectBuilding={loadBuilding} />
+
             <Card className="p-6 shadow-xl bg-white/80 backdrop-blur border-gray-200">
               <Tabs defaultValue="people" className="w-full">
-                <TabsList className="grid grid-cols-2 w-full mb-4">
+                <TabsList className="grid grid-cols-3 w-full mb-4">
                   <TabsTrigger value="people" className="flex items-center gap-2">
                     <Icon name="Users" size={16} />
                     Люди
@@ -223,10 +311,23 @@ const Index = () => {
                     <Icon name="AlertTriangle" size={16} />
                     ЧС
                   </TabsTrigger>
+                  <TabsTrigger value="building" className="flex items-center gap-2">
+                    <Icon name="Building" size={16} />
+                    План
+                  </TabsTrigger>
                 </TabsList>
 
                 <TabsContent value="people" className="space-y-4">
-                  <PeopleConfig onAddPerson={addPerson} peopleCount={people.length} />
+                  <PeopleConfig 
+                    onAddPerson={addPerson} 
+                    peopleCount={people.length}
+                    placementMode={placementMode}
+                    onSetPlacementMode={(type) => {
+                      setPlacementMode('person');
+                      setSelectedPersonType(type);
+                    }}
+                    onCancelPlacement={() => setPlacementMode(null)}
+                  />
                 </TabsContent>
 
                 <TabsContent value="emergency" className="space-y-4">
@@ -234,10 +335,39 @@ const Index = () => {
                     onAddEmergency={addEmergency} 
                     emergencies={emergencies}
                     onRemoveEmergency={(id) => setEmergencies(prev => prev.filter(e => e.id !== id))}
+                    placementMode={placementMode}
+                    onSetPlacementMode={(type) => {
+                      setPlacementMode('emergency');
+                      setSelectedEmergencyType(type);
+                    }}
+                    onCancelPlacement={() => setPlacementMode(null)}
                   />
+                </TabsContent>
+
+                <TabsContent value="building" className="space-y-4">
+                  <div className="space-y-3">
+                    <p className="text-sm text-gray-600">План: {rooms.length} помещений, {exits.length} выходов</p>
+                    <div className="p-3 bg-blue-50 rounded-lg border border-blue-200">
+                      <div className="flex items-start gap-2">
+                        <Icon name="Info" size={16} className="text-blue-600 mt-0.5" />
+                        <p className="text-xs text-blue-700">
+                          Выберите готовый план здания из библиотеки выше или используйте текущий.
+                        </p>
+                      </div>
+                    </div>
+                  </div>
                 </TabsContent>
               </Tabs>
             </Card>
+
+            {selectedPerson && (
+              <PersonEditor
+                person={selectedPerson}
+                onUpdate={updatePerson}
+                onDelete={deletePerson}
+                onClose={() => setSelectedPerson(null)}
+              />
+            )}
 
             <Card className="p-6 shadow-xl bg-white/80 backdrop-blur border-gray-200">
               <h3 className="text-lg font-semibold mb-4 flex items-center gap-2">

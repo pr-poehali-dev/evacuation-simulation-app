@@ -11,6 +11,10 @@ interface SimulationCanvasProps {
   evacuationTime: number;
   setEvacuationTime: React.Dispatch<React.SetStateAction<number>>;
   simulationSpeed: number;
+  onCanvasClick: (x: number, y: number) => void;
+  onPersonClick: (person: Person) => void;
+  placementMode: 'person' | 'emergency' | null;
+  currentFloor: number;
 }
 
 const SimulationCanvas = ({
@@ -23,9 +27,35 @@ const SimulationCanvas = ({
   evacuationTime,
   setEvacuationTime,
   simulationSpeed,
+  onCanvasClick,
+  onPersonClick,
+  placementMode,
+  currentFloor,
 }: SimulationCanvasProps) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const animationFrameRef = useRef<number>();
+
+  const handleCanvasClickInternal = (e: React.MouseEvent<HTMLCanvasElement>) => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+
+    const rect = canvas.getBoundingClientRect();
+    const scaleX = canvas.width / rect.width;
+    const scaleY = canvas.height / rect.height;
+    const x = (e.clientX - rect.left) * scaleX;
+    const y = (e.clientY - rect.top) * scaleY;
+
+    const clickedPerson = people.find(person => {
+      const dist = Math.hypot(person.x - x, person.y - y);
+      return dist <= person.size + 5;
+    });
+
+    if (clickedPerson) {
+      onPersonClick(clickedPerson);
+    } else {
+      onCanvasClick(x, y);
+    }
+  };
 
   const findPath = (person: Person, exits: Exit[], emergencies: Emergency[]): { x: number; y: number }[] => {
     const nearestExit = exits.reduce((nearest, exit) => {
@@ -228,14 +258,30 @@ const SimulationCanvas = ({
     };
   }, [people, rooms, exits, emergencies, isSimulating, simulationSpeed]);
 
+  const currentRooms = rooms.filter(room => {
+    if (!room.name.includes('этаж')) return true;
+    const floorMatch = room.name.match(/(\d+) этаж/);
+    return floorMatch ? parseInt(floorMatch[1]) === currentFloor : true;
+  });
+
   return (
     <div className="relative rounded-xl overflow-hidden shadow-inner bg-gray-100 border-2 border-gray-200">
       <canvas
         ref={canvasRef}
         width={720}
         height={500}
-        className="w-full h-auto"
+        className="w-full h-auto cursor-crosshair"
+        onClick={handleCanvasClickInternal}
       />
+      {placementMode && (
+        <div className="absolute top-3 left-3 bg-white/90 backdrop-blur px-4 py-2 rounded-lg shadow-lg border border-gray-300">
+          <div className="flex items-center gap-2 text-sm font-medium text-gray-700">
+            <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse" />
+            {placementMode === 'person' ? 'Режим размещения людей' : 'Режим размещения зон ЧС'}
+          </div>
+          <p className="text-xs text-gray-500 mt-1">Кликните на план для размещения</p>
+        </div>
+      )}
     </div>
   );
 };
