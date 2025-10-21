@@ -90,6 +90,8 @@ const Index = () => {
   const [isDrawingRoom, setIsDrawingRoom] = useState(false);
   const [drawStart, setDrawStart] = useState<{ x: number; y: number } | null>(null);
   const [hasSimulationRun, setHasSimulationRun] = useState(false);
+  const [groupEvacuationTimes, setGroupEvacuationTimes] = useState<Map<string, number>>(new Map());
+  const evacuatedGroupsRef = useRef<Set<string>>(new Set());
 
   const addPerson = (type: Person['type'], x?: number, y?: number, count: number = 1) => {
     const speedMap = {
@@ -259,6 +261,8 @@ const Index = () => {
     }
     setIsSimulating(true);
     setEvacuationTime(0);
+    setGroupEvacuationTimes(new Map());
+    evacuatedGroupsRef.current = new Set();
   };
 
   const stopSimulation = () => {
@@ -275,12 +279,16 @@ const Index = () => {
     setHasSimulationRun(false);
     setPlacementMode(null);
     setSelectedPerson(null);
+    setGroupEvacuationTimes(new Map());
+    evacuatedGroupsRef.current = new Set();
   };
 
   const restartSimulation = () => {
     setIsSimulating(false);
     setPeople(JSON.parse(JSON.stringify(initialPeople)));
     setEvacuationTime(0);
+    setGroupEvacuationTimes(new Map());
+    evacuatedGroupsRef.current = new Set();
   };
 
   const currentFloorPeople = people.filter(p => p.floor === currentFloor);
@@ -382,6 +390,9 @@ const Index = () => {
                 drawStart={drawStart}
                 isDrawingRoom={isDrawingRoom}
                 allPeople={people}
+                onGroupEvacuated={(groupId, time) => {
+                  setGroupEvacuationTimes(prev => new Map(prev).set(groupId, time));
+                }}
               />
 
               {totalFloors > 1 && (
@@ -421,6 +432,7 @@ const Index = () => {
               people={people}
               evacuationTime={evacuationTime}
               isSimulating={isSimulating}
+              groupEvacuationTimes={groupEvacuationTimes}
             />
           </div>
 

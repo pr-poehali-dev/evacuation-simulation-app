@@ -19,6 +19,7 @@ interface SimulationCanvasProps {
   drawStart: { x: number; y: number } | null;
   isDrawingRoom: boolean;
   allPeople: Person[];
+  onGroupEvacuated?: (groupId: string, time: number) => void;
 }
 
 const SimulationCanvas = ({
@@ -39,10 +40,12 @@ const SimulationCanvas = ({
   drawStart,
   isDrawingRoom,
   allPeople,
+  onGroupEvacuated,
 }: SimulationCanvasProps) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const animationFrameRef = useRef<number>();
   const mousePos = useRef<{ x: number; y: number }>({ x: 0, y: 0 });
+  const evacuatedGroupsRef = useRef<Set<string>>(new Set());
 
   const handleCanvasClickInternal = (e: React.MouseEvent<HTMLCanvasElement>) => {
     const canvas = canvasRef.current;
@@ -153,6 +156,13 @@ const SimulationCanvas = ({
   });
 
   const currentEmergencies = emergencies.filter(e => e.floor === currentFloor);
+
+  useEffect(() => {
+    // Сбрасываем evacuatedGroupsRef при старте симуляции
+    if (isSimulating) {
+      evacuatedGroupsRef.current = new Set();
+    }
+  }, [isSimulating]);
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -306,7 +316,7 @@ const SimulationCanvas = ({
     const animate = () => {
       if (isSimulating) {
         setPeople(prevPeople => {
-          return prevPeople.map(person => {
+          const updatedPeople = prevPeople.map(person => {
             if (person.evacuated || person.floor !== currentFloor) return person;
 
             if (person.path.length > 0 && person.currentPathIndex < person.path.length) {
@@ -317,7 +327,22 @@ const SimulationCanvas = ({
 
               if (distance < person.speed * simulationSpeed) {
                 if (person.currentPathIndex === person.path.length - 1) {
-                  return { ...person, evacuated: true };
+                  const evacuatedPerson = { ...person, evacuated: true };
+                  
+                  // Проверяем, эвакуирована ли вся группа
+                  if (person.groupId && onGroupEvacuated && !evacuatedGroupsRef.current.has(person.groupId)) {
+                    const groupMembers = allPeople.filter(p => p.groupId === person.groupId);
+                    const allEvacuated = groupMembers.every(m => 
+                      m.id === person.id ? true : m.evacuated
+                    );
+                    
+                    if (allEvacuated) {
+                      evacuatedGroupsRef.current.add(person.groupId);
+                      onGroupEvacuated(person.groupId, evacuationTime);
+                    }
+                  }
+                  
+                  return evacuatedPerson;
                 }
                 return {
                   ...person,
@@ -351,6 +376,8 @@ const SimulationCanvas = ({
 
             return person;
           });
+          
+          return updatedPeople;
         });
 
         setEvacuationTime(prev => prev + 0.016 * simulationSpeed);
