@@ -96,11 +96,12 @@ const SimulationCanvas = ({
     const path: { x: number; y: number }[] = [];
     const currentRoom = rooms.find(room => isPointInRoom(person.x, person.y, room));
     
+    // Если человек в комнате, сначала идём к выходу из комнаты
     if (currentRoom) {
       const doorX = currentRoom.x + currentRoom.width;
       const doorY = currentRoom.y + currentRoom.height / 2;
       
-      const stepsToDoор = 10;
+      const stepsToDoор = 8;
       for (let i = 1; i <= stepsToDoор; i++) {
         const t = i / stepsToDoор;
         path.push({
@@ -110,23 +111,46 @@ const SimulationCanvas = ({
       }
     }
 
-    const steps = 15;
+    // Строим путь к выходу, избегая стены и опасности
+    const steps = 20;
     const startX = currentRoom ? currentRoom.x + currentRoom.width : person.x;
     const startY = currentRoom ? currentRoom.y + currentRoom.height / 2 : person.y;
     
-    for (let i = 0; i <= steps; i++) {
+    for (let i = 1; i <= steps; i++) {
       const t = i / steps;
       let x = startX + (nearestExit.x - startX) * t;
       let y = startY + (nearestExit.y - startY) * t;
 
+      // Избегаем зоны ЧС
       emergencies.forEach(emergency => {
         if (emergency.floor !== currentFloor) return;
         const dist = Math.hypot(emergency.x - x, emergency.y - y);
-        if (dist < emergency.radius + 30) {
+        if (dist < emergency.radius + 40) {
           const angle = Math.atan2(y - emergency.y, x - emergency.x);
-          const avoidDist = emergency.radius + 30 - dist;
-          x += Math.cos(angle) * avoidDist * 1.5;
-          y += Math.sin(angle) * avoidDist * 1.5;
+          const avoidDist = emergency.radius + 40 - dist;
+          x += Math.cos(angle) * avoidDist * 2;
+          y += Math.sin(angle) * avoidDist * 2;
+        }
+      });
+
+      // Избегаем стен других комнат
+      rooms.forEach(room => {
+        if (currentRoom && room.id === currentRoom.id) return;
+        
+        // Если точка внутри другой комнаты, отталкиваем её
+        if (isPointInRoom(x, y, room)) {
+          // Находим ближайшую стену и отталкиваем
+          const distToLeft = x - room.x;
+          const distToRight = (room.x + room.width) - x;
+          const distToTop = y - room.y;
+          const distToBottom = (room.y + room.height) - y;
+          
+          const minDist = Math.min(distToLeft, distToRight, distToTop, distToBottom);
+          
+          if (minDist === distToLeft) x = room.x - 5;
+          else if (minDist === distToRight) x = room.x + room.width + 5;
+          else if (minDist === distToTop) y = room.y - 5;
+          else y = room.y + room.height + 5;
         }
       });
 
@@ -139,10 +163,11 @@ const SimulationCanvas = ({
   useEffect(() => {
     if (!isSimulating) return;
 
+    const currentFloorRooms = rooms.filter(r => !r.name.includes('этаж') || r.name.includes(`${currentFloor} этаж`));
+    
     setPeople(prevPeople => prevPeople.map(person => {
       if (person.evacuated || person.floor !== currentFloor) return person;
       if (person.path.length === 0) {
-        const currentFloorRooms = rooms.filter(r => !r.name.includes('этаж') || r.name.includes(`${currentFloor} этаж`));
         return { ...person, path: findPath(person, exits, currentFloorRooms, emergencies) };
       }
       return person;
@@ -249,31 +274,37 @@ const SimulationCanvas = ({
         ctx.fillText(emergency.type === 'fire' ? '🔥' : emergency.type === 'smoke' ? '💨' : '⚠️', emergency.x, emergency.y + 8);
       });
 
+      // Рисуем связи групп (один раз для каждой группы)
+      const drawnGroups = new Set<string>();
+      const colorMap = {
+        adult: '#3b82f6',
+        child: '#f59e0b',
+        elderly: '#8b5cf6',
+        disabled: '#ec4899',
+      };
+
+      people.forEach(person => {
+        if (person.evacuated || !person.groupId || drawnGroups.has(person.groupId)) return;
+        
+        const groupMembers = allPeople.filter(p => p.groupId === person.groupId && !p.evacuated && p.floor === currentFloor);
+        if (groupMembers.length > 1) {
+          ctx.strokeStyle = `${colorMap[person.type]}30`;
+          ctx.lineWidth = 1;
+          ctx.setLineDash([2, 2]);
+          ctx.beginPath();
+          groupMembers.forEach((member, idx) => {
+            if (idx === 0) ctx.moveTo(member.x, member.y);
+            else ctx.lineTo(member.x, member.y);
+          });
+          ctx.stroke();
+          ctx.setLineDash([]);
+          drawnGroups.add(person.groupId);
+        }
+      });
+
+      // Рисуем людей
       people.forEach(person => {
         if (person.evacuated) return;
-
-        const colorMap = {
-          adult: '#3b82f6',
-          child: '#f59e0b',
-          elderly: '#8b5cf6',
-          disabled: '#ec4899',
-        };
-
-        if (person.groupId) {
-          const groupMembers = allPeople.filter(p => p.groupId === person.groupId && !p.evacuated);
-          if (groupMembers.length > 1) {
-            ctx.strokeStyle = `${colorMap[person.type]}30`;
-            ctx.lineWidth = 1;
-            ctx.setLineDash([2, 2]);
-            ctx.beginPath();
-            groupMembers.forEach((member, idx) => {
-              if (idx === 0) ctx.moveTo(member.x, member.y);
-              else ctx.lineTo(member.x, member.y);
-            });
-            ctx.stroke();
-            ctx.setLineDash([]);
-          }
-        }
 
         ctx.fillStyle = colorMap[person.type];
         ctx.beginPath();
@@ -356,16 +387,67 @@ const SimulationCanvas = ({
               let newX = person.x + Math.cos(angle) * person.speed * simulationSpeed;
               let newY = person.y + Math.sin(angle) * person.speed * simulationSpeed;
 
+              // Проверка столкновений с другими людьми (только близкие)
+              const checkRadius = 50;
               prevPeople.forEach(other => {
                 if (other.id === person.id || other.evacuated || other.floor !== person.floor) return;
+                
+                // Быстрая проверка - только если близко
+                const roughDist = Math.abs(other.x - newX) + Math.abs(other.y - newY);
+                if (roughDist > checkRadius) return;
+                
                 const dist = Math.hypot(other.x - newX, other.y - newY);
                 const minDist = person.size + other.size + 2;
-                if (dist < minDist) {
+                if (dist < minDist && dist > 0) {
                   const pushAngle = Math.atan2(newY - other.y, newX - other.x);
-                  newX = other.x + Math.cos(pushAngle) * minDist;
-                  newY = other.y + Math.sin(pushAngle) * minDist;
+                  const pushDist = minDist - dist;
+                  newX += Math.cos(pushAngle) * pushDist;
+                  newY += Math.sin(pushAngle) * pushDist;
                 }
               });
+
+              // Проверка столкновений со стенами комнат
+              const personRoom = currentRooms.find(room => isPointInRoom(person.x, person.y, room));
+              
+              for (const room of currentRooms) {
+                // Если человек в этой комнате, пропускаем
+                if (personRoom && personRoom.id === room.id) continue;
+                
+                const buffer = person.size + 2;
+                
+                // Быстрая проверка - находится ли точка рядом с комнатой
+                if (newX < room.x - buffer || newX > room.x + room.width + buffer ||
+                    newY < room.y - buffer || newY > room.y + room.height + buffer) {
+                  continue;
+                }
+                
+                // Если новая позиция внутри комнаты (проходит сквозь стену)
+                if (isPointInRoom(newX, newY, room)) {
+                  // Возвращаем к старой позиции с отталкиванием от центра
+                  const centerX = room.x + room.width / 2;
+                  const centerY = room.y + room.height / 2;
+                  const awayAngle = Math.atan2(person.y - centerY, person.x - centerX);
+                  
+                  // Находим ближайшую точку снаружи комнаты
+                  if (person.x < room.x) {
+                    newX = room.x - buffer;
+                  } else if (person.x > room.x + room.width) {
+                    newX = room.x + room.width + buffer;
+                  } else {
+                    newX = person.x + Math.cos(awayAngle) * 2;
+                  }
+                  
+                  if (person.y < room.y) {
+                    newY = room.y - buffer;
+                  } else if (person.y > room.y + room.height) {
+                    newY = room.y + room.height + buffer;
+                  } else {
+                    newY = person.y + Math.sin(awayAngle) * 2;
+                  }
+                  
+                  break;
+                }
+              }
 
               return {
                 ...person,
@@ -394,7 +476,7 @@ const SimulationCanvas = ({
         cancelAnimationFrame(animationFrameRef.current);
       }
     };
-  }, [people, currentRooms, exits, currentEmergencies, safeZones, isSimulating, simulationSpeed, currentFloor, drawStart, mousePos.current, allPeople]);
+  }, [people, currentRooms, exits, currentEmergencies, safeZones, isSimulating, simulationSpeed, currentFloor, drawStart, allPeople, placementMode, onGroupEvacuated, evacuationTime]);
 
   return (
     <div className="relative rounded-xl overflow-hidden shadow-inner bg-gray-100 border-2 border-gray-200">
