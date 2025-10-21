@@ -1,4 +1,4 @@
-import type { Room, Exit } from '@/pages/Index';
+import type { Room, Exit, Staircase } from '@/pages/Index';
 
 export interface BuildingPlan {
   id: string;
@@ -7,7 +7,7 @@ export interface BuildingPlan {
   floors: number;
   rooms: Room[];
   exits: Exit[];
-  stairs?: { x: number; y: number; width: number; height: number; floor: number }[];
+  staircases?: Staircase[];
 }
 
 export const buildingTemplates: BuildingPlan[] = [
@@ -17,9 +17,9 @@ export const buildingTemplates: BuildingPlan[] = [
     description: 'Офисное помещение с открытым пространством и кабинетами',
     floors: 1,
     rooms: [
-      { id: '1', x: 50, y: 50, width: 300, height: 200, name: 'Открытое пространство' },
-      { id: '2', x: 400, y: 50, width: 250, height: 200, name: 'Переговорная' },
-      { id: '3', x: 50, y: 300, width: 200, height: 150, name: 'Кабинет 1' },
+      { id: '1', x: 50, y: 50, width: 300, height: 200, name: 'Открытое пространство', doorX: 350, doorY: 125, doorWidth: 40 },
+      { id: '2', x: 400, y: 50, width: 250, height: 200, name: 'Переговорная', doorX: 400, doorY: 125, doorWidth: 40 },
+      { id: '3', x: 50, y: 300, width: 200, height: 150, name: 'Кабинет 1', doorX: 250, doorY: 350, doorWidth: 40 },
       { id: '4', x: 300, y: 300, width: 350, height: 150, name: 'Коридор' },
     ],
     exits: [
@@ -112,9 +112,8 @@ export const buildingTemplates: BuildingPlan[] = [
       { id: '1', x: 10, y: 140, width: 35 },
       { id: '2', x: 675, y: 330, width: 35 },
     ],
-    stairs: [
-      { x: 520, y: 50, width: 130, height: 80, floor: 1 },
-      { x: 500, y: 50, width: 150, height: 80, floor: 2 },
+    staircases: [
+      { id: 's1', x: 520, y: 50, width: 130, height: 80, fromFloor: 2, toFloor: 1 },
     ],
   },
   {
@@ -149,10 +148,9 @@ export const buildingTemplates: BuildingPlan[] = [
       { id: '1', x: 10, y: 255, width: 35 },
       { id: '2', x: 675, y: 255, width: 35 },
     ],
-    stairs: [
-      { x: 520, y: 50, width: 130, height: 150, floor: 1 },
-      { x: 470, y: 50, width: 180, height: 100, floor: 2 },
-      { x: 470, y: 50, width: 180, height: 100, floor: 3 },
+    staircases: [
+      { id: 's1', x: 470, y: 50, width: 180, height: 100, fromFloor: 3, toFloor: 2 },
+      { id: 's2', x: 520, y: 50, width: 130, height: 150, fromFloor: 2, toFloor: 1 },
     ],
   },
 ];

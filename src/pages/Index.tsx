@@ -35,6 +35,9 @@ export interface Room {
   width: number;
   height: number;
   name: string;
+  doorX?: number;
+  doorY?: number;
+  doorWidth?: number;
 }
 
 export interface Exit {
@@ -42,6 +45,16 @@ export interface Exit {
   x: number;
   y: number;
   width: number;
+}
+
+export interface Staircase {
+  id: string;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  fromFloor: number;
+  toFloor: number;
 }
 
 export interface Emergency {
@@ -66,11 +79,12 @@ const Index = () => {
   const [isSimulating, setIsSimulating] = useState(false);
   const [people, setPeople] = useState<Person[]>([]);
   const [rooms, setRooms] = useState<Room[]>([
-    { id: '1', x: 50, y: 50, width: 300, height: 200, name: 'Зал 1' },
-    { id: '2', x: 400, y: 50, width: 250, height: 200, name: 'Зал 2' },
-    { id: '3', x: 50, y: 300, width: 200, height: 150, name: 'Офис' },
+    { id: '1', x: 50, y: 50, width: 300, height: 200, name: 'Зал 1', doorX: 350, doorY: 125, doorWidth: 40 },
+    { id: '2', x: 400, y: 50, width: 250, height: 200, name: 'Зал 2', doorX: 400, doorY: 125, doorWidth: 40 },
+    { id: '3', x: 50, y: 300, width: 200, height: 150, name: 'Офис', doorX: 250, doorY: 350, doorWidth: 40 },
     { id: '4', x: 300, y: 300, width: 350, height: 150, name: 'Коридор' },
   ]);
+  const [staircases, setStaircases] = useState<Staircase[]>([]);
   const [exits, setExits] = useState<Exit[]>([
     { id: '1', x: 680, y: 220, width: 40 },
     { id: '2', x: 20, y: 220, width: 40 },
@@ -244,6 +258,7 @@ const Index = () => {
       }
       setRooms(template.rooms);
       setExits(template.exits);
+      setStaircases(template.staircases || []);
       setTotalFloors(template.floors);
       setCurrentFloor(1);
       setPeople([]);
@@ -393,6 +408,7 @@ const Index = () => {
                 onGroupEvacuated={(groupId, time) => {
                   setGroupEvacuationTimes(prev => new Map(prev).set(groupId, time));
                 }}
+                staircases={staircases}
               />
 
               {totalFloors > 1 && (
